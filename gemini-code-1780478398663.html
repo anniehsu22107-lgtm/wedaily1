@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>WeDaily - 微日：情緒足跡與回憶扭蛋</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+        
+        body { font-family: 'Noto Sans TC', sans-serif; background: #f5f8f6; }
+
+        /* 小球彈跳動畫 */
+        @keyframes b1 { 0%, 100% { transform: translate(0,0) rotate(0); } 25% { transform: translate(40px,-80px) rotate(90deg); } 50% { transform: translate(-30px,-40px) rotate(180deg); } 75% { transform: translate(20px,-90px) rotate(270deg); } }
+        @keyframes b2 { 0%, 100% { transform: translate(0,0) rotate(0); } 30% { transform: translate(-50px,-60px) rotate(-120deg); } 60% { transform: translate(40px,-100px) rotate(-240deg); } }
+        @keyframes b3 { 0%, 100% { transform: translate(0,0) rotate(0); } 20% { transform: translate(20px,-110px) rotate(45deg); } 80% { transform: translate(-50px,-30px) rotate(320deg); } }
+        @keyframes b4 { 0%, 100% { transform: translate(0,0) rotate(0); } 40% { transform: translate(-60px,-90px) rotate(-60deg); } 70% { transform: translate(50px,-20px) rotate(150deg); } }
+        @keyframes b5 { 0%, 100% { transform: translate(0,0) rotate(0); } 50% { transform: translate(10px,-120px) rotate(200deg); } }
+
+        .gacha-active .ball-1 { animation: b1 0.4s ease-in-out infinite; z-index: 10; }
+        .gacha-active .ball-2 { animation: b2 0.35s ease-in-out infinite; z-index: 20; }
+        .gacha-active .ball-3 { animation: b3 0.45s ease-in-out infinite; z-index: 15; }
+        .gacha-active .ball-4 { animation: b4 0.38s ease-in-out infinite; z-index: 5; }
+        .gacha-active .ball-5 { animation: b5 0.42s ease-in-out infinite; z-index: 25; }
+
+        @keyframes crank-turn { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .gacha-active .crank { animation: crank-turn 0.5s linear infinite; }
+
+        /* 莫蘭迪暈染足跡 */
+        .emotion-glow {
+            border-radius: 50%;
+            filter: blur(8px);
+            opacity: 0.92;
+            transition: all 0.3s ease;
+        }
+
+        /* 放大地圖時直接顯示的文字樣式 */
+        .map-footprint-label {
+            white-space: nowrap;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 500;
+            color: #2d3748;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+            border: 1px solid rgba(0,0,0,0.05);
+            position: absolute;
+            bottom: 38px;
+            left: 50%;
+            transform: translateX(-50%);
+            pointer-events: none;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            display: none;
+        }
+
+        .leaflet-zoom-animated.show-labels .map-footprint-label {
+            display: block;
+            animation: fadeInLabel 0.3s ease-out;
+        }
+
+        @keyframes fadeInLabel {
+            from { opacity: 0; transform: translate(-50%, 5px); }
+            to { opacity: 1; transform: translate(-50%, 0); }
+        }
+
+        .safe-bottom-buffer {
+            padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 2.5rem);
+        }
+
+        /* 調整優化：標準全彩光譜色環背景，表示完整調色盤 */
+        .full-spectrum-wheel {
+            background: conic-gradient(from 0deg, red, yellow, lime, cyan, blue, magenta, red);
+        }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden text-gray-800 flex flex-col">
+
+    <!-- ================= 頁面 0: 主選單 ================= -->
+    <section id="page-menu" class="flex flex-col items-center justify-center p-6 h-full max-w-md mx-auto w-full">
+        <div class="text-center mb-12">
+            <div class="w-20 h-20 bg-emerald-100 rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-inner">
+                <i data-lucide="sparkles" class="w-10 h-10 text-emerald-600"></i>
+            </div>
+            <h1 class="text-3xl font-bold tracking-wider text-emerald-900">WeDaily 微日</h1>
+            <p class="text-emerald-700/70 text-sm mt-2">空間、時間與心靈的溫柔連結</p>
+        </div>
+        <div class="w-full space-y-4">
+            <button onclick="navigateTo('page-diary')" class="w-full p-5 bg-white border border-emerald-100 rounded-2xl shadow-sm flex items-center gap-4 hover:border-emerald-300 active:scale-95 transition-all group">
+                <div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl group-hover:bg-emerald-600 group-hover:text-white transition-all"><i data-lucide="message-circle"></i></div>
+                <div class="text-left"><h3 class="font-bold text-gray-800">記錄日常</h3><p class="text-xs text-gray-400 mt-0.5">與 AI 傾聽你的每日心情</p></div>
+            </button>
+            <button onclick="navigateTo('page-gacha')" class="w-full p-5 bg-white border border-emerald-100 rounded-2xl shadow-sm flex items-center gap-4 hover:border-emerald-300 active:scale-95 transition-all group">
+                <div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl group-hover:bg-emerald-600 group-hover:text-white transition-all"><i data-lucide="clover"></i></div>
+                <div class="text-left"><h3 class="font-bold text-gray-800">回憶扭蛋機</h3><p class="text-xs text-gray-400 mt-0.5">隨機重溫珍貴瞬間</p></div>
+            </button>
+            <button onclick="navigateTo('page-map')" class="w-full p-5 bg-white border border-emerald-100 rounded-2xl shadow-sm flex items-center gap-4 hover:border-emerald-300 active:scale-95 transition-all group">
+                <div class="p-3 bg-emerald-50 text-emerald-600 rounded-xl group-hover:bg-emerald-600 group-hover:text-white transition-all"><i data-lucide="map"></i></div>
+                <div class="text-left"><h3 class="font-bold text-gray-800">情緒足跡</h3><p class="text-xs text-gray-400 mt-0.5">暈染你的情感地標</p></div>
+            </button>
+        </div>
+    </section>
+
+    <!-- ================= 頁面 1: 記錄日常 ================= -->
+    <section id="page-diary" class="hidden flex-col h-full max-w-2xl mx-auto p-4 w-full">
+        <header class="flex items-center justify-between py-3 border-b border-gray-100 shrink-0">
+            <button onclick="navigateTo('page-menu')" class="p-2 hover:bg-gray-100 rounded-full text-gray-500"><i data-lucide="arrow-left"></i></button>
+            <h2 class="font-bold text-lg text-emerald-900">日常對話</h2>
+            <div class="w-10"></div>
+        </header>
+        <div id="chat-messages-container" class="flex-1 overflow-y-auto py-4 px-1">
+            <div id="chat-messages" class="space-y-4">
+                <div class="flex items-start gap-3">
+                    <div class="w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600 shrink-0"><i data-lucide="sparkles" class="w-4 h-4"></i></div>
+                    <div class="bg-white p-3 rounded-2xl rounded-tl-none shadow-sm border border-emerald-50/50 text-gray-700 max-w-[85%] text-sm">你好呀！今天過得怎麼樣呢？無論是開心還是疲憊，我都想聽你聊聊，這裡只有我們，你可以放心地說。</div>
+                </div>
+            </div>
+        </div>
+        <div class="relative pt-2 safe-bottom-buffer shrink-0 mb-4">
+            <input type="text" id="diary-input" placeholder="對我說點什麼吧..." class="w-full p-4 pr-12 rounded-2xl border border-emerald-100 shadow-lg focus:outline-none focus:ring-2 focus:ring-emerald-200 bg-white">
+            <button onclick="sendMessage()" class="absolute right-4 top-6 p-1 text-emerald-400 hover:text-emerald-600"><i data-lucide="send"></i></button>
+        </div>
+    </section>
+
+    <!-- ================= 頁面 2: 回憶扭蛋機 ================= -->
+    <section id="page-gacha" class="hidden flex-col items-center justify-between h-full max-w-md mx-auto p-4 w-full">
+        <header class="w-full flex items-center justify-between py-3 shrink-0"><button onclick="navigateTo('page-menu')" class="p-2 hover:bg-gray-100 rounded-full text-gray-500"><i data-lucide="arrow-left"></i></button><h2 class="font-bold text-lg text-emerald-900">時光扭蛋機</h2><div class="w-10"></div></header>
+        <div id="gacha-machine-box" class="flex-1 flex flex-col items-center justify-center w-full">
+            <div class="relative w-64 h-72 mb-4">
+                <div class="w-64 h-64 bg-white/40 rounded-full shadow-lg border-[6px] border-emerald-600 relative overflow-hidden bg-gradient-to-b from-white/20 to-emerald-50/30">
+                    <div class="ball-1 absolute bottom-4 left-6 w-12 h-12 rounded-full border-2 border-white shadow-md bg-[#A3B899]"></div>
+                    <div class="ball-2 absolute bottom-6 left-20 w-11 h-11 rounded-full border-2 border-white shadow-md bg-[#9CA9BB]"></div>
+                    <div class="ball-3 absolute bottom-2 right-8 w-13 h-13 rounded-full border-2 border-white shadow-md bg-[#E5C1A7]"></div>
+                    <div class="ball-4 absolute bottom-14 left-12 w-10 h-10 rounded-full border-2 border-white shadow-md bg-[#C9A7A7]"></div>
+                    <div class="ball-5 absolute bottom-12 right-16 w-12 h-12 rounded-full border-2 border-white shadow-md bg-[#A3B899]"></div>
+                </div>
+                <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-24 h-20 bg-emerald-700 rounded-b-2xl border-t-[4px] border-white flex flex-col items-center pt-2 shadow-md z-30">
+                    <div class="crank w-10 h-10 bg-white rounded-full flex items-center justify-center border-2 border-emerald-800 shadow"><div class="absolute w-1 h-8 bg-gray-400 rounded"></div><div class="absolute w-8 h-1 bg-gray-400 rounded"></div></div>
+                    <div class="w-10 h-6 bg-gray-900 rounded-t-md mt-2"></div>
+                </div>
+            </div>
+        </div>
+        <div class="w-full safe-bottom-buffer px-4 shrink-0 mb-4">
+            <button onclick="playGacha()" class="w-full bg-emerald-600 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-emerald-700 active:scale-95 transition-all">轉動扭蛋</button>
+        </div>
+        <!-- 扭蛋結果彈窗 -->
+        <div id="gacha-result" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center p-6 z-50">
+            <div class="bg-white w-full max-w-sm p-6 rounded-3xl text-center shadow-2xl border border-emerald-50">
+                <div id="capsule-color" class="w-16 h-16 rounded-full mx-auto mb-4 border-4 border-white shadow-md"></div>
+                <p id="gacha-time" class="text-xs font-bold text-emerald-700 mb-2 bg-emerald-50 py-1 px-3 rounded-full inline-block"></p>
+                <div class="bg-gray-50 rounded-2xl p-4 text-left border border-gray-100 mb-4">
+                    <p id="gacha-title-label" class="text-xs text-gray-400 mb-1">當時的心情記憶：</p>
+                    <p id="gacha-text" class="text-gray-700 font-medium text-sm leading-relaxed"></p>
+                </div>
+                <div id="gacha-reply-box" class="text-gray-400 text-xs px-2 text-left leading-relaxed border-t border-gray-100 pt-3 mt-1">
+                    <p id="gacha-ai-reply"></p>
+                </div>
+                <button onclick="closeGacha()" class="w-full mt-5 py-3 bg-emerald-600 text-white rounded-xl font-medium shadow-md">收下回憶</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- ================= 頁面 3: 情緒足跡地圖 ================= -->
+    <section id="page-map" class="hidden flex-col h-full relative w-full">
+        <header class="absolute top-4 left-4 right-4 z-[1000] flex items-center justify-between p-3 bg-white/95 backdrop-blur-md rounded-2xl shadow-md border border-emerald-50">
+            <button onclick="navigateTo('page-menu')" class="p-2 hover:bg-gray-100 rounded-full text-gray-500"><i data-lucide="arrow-left"></i></button>
+            <h2 class="font-bold text-emerald-900 text-base">情緒足跡地圖</h2>
+            <div class="w-10"></div>
+        </header>
+        <div id="map" class="w-full h-full flex-1"></div>
+        <div class="absolute bottom-0 left-0 right-0 z-[1000] flex flex-col gap-3 p-4 safe-bottom-buffer pointer-events-none">
+            <div class="bg-white/95 backdrop-blur-md p-4 rounded-2xl shadow-2xl flex flex-col gap-3 border border-emerald-50 pointer-events-auto max-w-md mx-auto w-full mb-6">
+                <!-- 調整優化：高規格色彩面板（保留原建議色，並整合色環、色譜與拾色器完整功能的自定義區塊） -->
+                <div class="flex flex-col gap-2 border-b pb-2">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold text-gray-400">心情建議色：</span>
+                        <div class="flex items-center gap-1.5" id="preset-colors">
+                            <button onclick="selectPresetColor('#A3B899', this)" class="w-5 h-5 rounded-full bg-[#A3B899] border-2 border-white ring-2 ring-emerald-600 transition-all"></button>
+                            <button onclick="selectPresetColor('#9CA9BB', this)" class="w-5 h-5 rounded-full bg-[#9CA9BB] border-2 border-white transition-all"></button>
+                            <button onclick="selectPresetColor('#E5C1A7', this)" class="w-5 h-5 rounded-full bg-[#E5C1A7] border-2 border-white transition-all"></button>
+                            <button onclick="selectPresetColor('#C9A7A7', this)" class="w-5 h-5 rounded-full bg-[#C9A7A7] border-2 border-white transition-all"></button>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center gap-2 mt-1 bg-gray-50 p-2 rounded-xl border border-gray-100">
+                        <span class="text-[11px] font-bold text-gray-500 pl-1 shrink-0">自定義調色盤：</span>
+                        
+                        <!-- 點擊觸發全功能色環/色譜拾色器 -->
+                        <div onclick="document.getElementById('custom-color-picker').click();" class="w-7 h-7 rounded-full full-spectrum-wheel shadow-md flex items-center justify-center cursor-pointer relative shrink-0 hover:scale-105 active:scale-95 transition-transform" title="開啟色環與拾色器">
+                            <div class="w-2.5 h-2.5 bg-white rounded-full border border-gray-400 shadow-sm"></div>
+                            <!-- 利用原生介面渲染包含 色環圖、色譜矩陣 與 螢幕拾色滴管 的全功能調色盤 -->
+                            <input type="color" id="custom-color-picker" value="#A3B899" oninput="handlePaletteInput(this.value)" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
+                        </div>
+
+                        <!-- 直接輸入色號功能 -->
+                        <div class="flex-1 flex items-center bg-white rounded-lg border border-gray-200 px-2 py-1">
+                            <span class="text-xs text-gray-400 font-mono font-bold">#</span>
+                            <input type="text" id="color-hex-input" value="A3B899" onchange="handleHexInput(this.value)" placeholder="HEX色號" class="w-full text-xs font-mono font-bold focus:outline-none border-none p-0 pl-1 text-gray-700 uppercase">
+                        </div>
+
+                        <!-- 目前色值動態預覽小方塊 -->
+                        <div id="current-color-preview" class="w-6 h-6 rounded-lg border border-gray-300 shadow-inner shrink-0 bg-[#A3B899]" onclick="document.getElementById('custom-color-picker').click();"></div>
+                    </div>
+                </div>
+
+                <div class="flex gap-2 items-center">
+                    <input type="text" id="emotion-tag" placeholder="在地圖點擊特定地點後輸入..." class="flex-1 bg-gray-50 p-2.5 rounded-xl border-none text-sm focus:ring-1 focus:ring-emerald-300">
+                    <button onclick="addFootprintAtSelected()" class="bg-emerald-600 text-white p-2.5 rounded-xl"><i data-lucide="map-pin" class="w-5 h-5"></i></button>
+                </div>
+                <div class="flex justify-center items-center pointer-events-auto">
+                    <label class="flex items-center gap-2 text-xs font-semibold text-emerald-900 bg-emerald-50 py-2 px-4 rounded-full cursor-pointer">
+                        <input type="checkbox" id="share-footprint" onchange="toggleSharedFootprints(this)" class="rounded text-emerald-600 w-4 h-4"> 開啟共享足跡
+                    </label>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <script>
+        lucide.createIcons();
+        let diaries = [];
+        let selectedColor = '#A3B899';
+        let selectedLatLng = null;
+        let tempMarker = null;
+        let sharedMarkersGroup = L.layerGroup();
+        let chatStep = 0;
+
+        function navigateTo(pageId) {
+            ['page-menu', 'page-diary', 'page-gacha', 'page-map'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+                document.getElementById(id).classList.remove('flex');
+            });
+            const target = document.getElementById(pageId);
+            target.classList.remove('hidden');
+            target.classList.add('flex');
+            if(pageId === 'page-map') setTimeout(() => map.invalidateSize(), 300);
+        }
+
+        // 點擊建議莫蘭迪顏色
+        function selectPresetColor(color, element) {
+            selectedColor = color;
+            document.getElementById('current-color-preview').style.backgroundColor = color;
+            document.getElementById('color-hex-input').value = color.replace('#', '');
+            document.getElementById('custom-color-picker').value = color;
+            
+            const buttons = document.querySelectorAll('#preset-colors button');
+            buttons.forEach(btn => btn.classList.remove('ring-2', 'ring-emerald-600'));
+            if(element) element.classList.add('ring-2', 'ring-emerald-600');
+        }
+
+        // 處理全功能調色盤變更（支援色環、色譜與拾色器同步）
+        function handlePaletteInput(colorValue) {
+            selectedColor = colorValue;
+            document.getElementById('current-color-preview').style.backgroundColor = colorValue;
+            document.getElementById('color-hex-input').value = colorValue.replace('#', '').toUpperCase();
+            
+            const buttons = document.querySelectorAll('#preset-colors button');
+            buttons.forEach(btn => btn.classList.remove('ring-2', 'ring-emerald-600'));
+        }
+
+        // 處理直接打字輸入色號
+        function handleHexInput(hexValue) {
+            let cleanHex = hexValue.trim().replace('#', '');
+            if (cleanHex.length === 3) {
+                cleanHex = cleanHex.split('').map(c => c + c).join('');
+            }
+            if (cleanHex.length === 6) {
+                const finalColor = '#' + cleanHex;
+                selectedColor = finalColor;
+                document.getElementById('current-color-preview').style.backgroundColor = finalColor;
+                document.getElementById('custom-color-picker').value = finalColor;
+                
+                const buttons = document.querySelectorAll('#preset-colors button');
+                buttons.forEach(btn => btn.classList.remove('ring-2', 'ring-emerald-600'));
+            } else {
+                document.getElementById('color-hex-input').value = selectedColor.replace('#', '').toUpperCase();
+            }
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('diary-input');
+            const userText = input.value.trim();
+            if(!userText) return;
+
+            diaries.push({ time: new Date().toLocaleDateString(), text: userText, color: selectedColor });
+            
+            const chatBox = document.getElementById('chat-messages');
+            const container = document.getElementById('chat-messages-container');
+            
+            chatBox.innerHTML += `
+                <div class="flex justify-end gap-3">
+                    <div class="bg-emerald-600 p-3 rounded-2xl rounded-tr-none text-white shadow-sm max-w-[85%] text-sm leading-relaxed">${userText}</div>
+                </div>
+            `;
+            input.value = '';
+            container.scrollTop = container.scrollHeight;
+
+            setTimeout(() => {
+                let aiReply = "";
+                const getRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+                if (userText.includes('吵架') || userText.includes('生氣') || userText.includes('討厭') || userText.includes('不爽')) {
+                    const replies = [
+                        "聽到你這麼說，心裡一定積壓了很多委屈與憤怒吧？難受是完全正常的，這裡只有我們，你可以把所有的不快都倒出來，我會一直聽著。",
+                        "氣呼呼的感覺真的很傷神呢...先深呼吸一下。能讓你這麼憤怒，一定是對方做了很過分的事。你最想對他吐槽 or 發洩的是什麼？跟我說說，我們一起同仇敵愾！",
+                        "被在乎的人或是莫名其妙的事情惹火，真的會讓人整天心情都毀了。別把氣悶在心裡憋壞了，願意跟我說說事情的來龍去脈嗎？我在這陪你梳理。"
+                    ];
+                    aiReply = getRandom(replies);
+                } else if (userText.includes('累') || userText.includes('難過') || userText.includes('哭') || userText.includes('壓力') || userText.includes('崩潰')) {
+                    const replies = [
+                        "辛苦你了...真的辛苦了。看著你承載了這麼多，真的好想抱抱你。現在的你已經做得夠好了，不需要強迫自己一直表現得那麼堅強。今晚就好好休息好嗎？",
+                        "眼淚是心靈在排毒，想哭就哭出來，沒關係的。不管是生活上的重擔還是工作學業的壓力，你已經熬過最難的部分了。現在閉上眼睛，什麼都不要想，我陪著你。",
+                        "聽得出來你現在的能量格快要耗盡了...生活有時沉重得讓人喘不過氣。不介意的話，要不要再跟我說說最讓你感到疲憊的那個瞬間？把壓力釋放出來一些吧。"
+                    ];
+                    aiReply = getRandom(replies);
+                } else if (userText.includes('高興') || userText.includes('開心') || userText.includes('順利') || userText.includes('棒') || userText.includes('幸運')) {
+                    const replies = [
+                        "哇！太為你開心了！看到你閃閃發光的樣子，連我的心裡也跟著暖洋洋的。你付出的努力都得到美好的回報了呢，你真的超棒！",
+                        "太棒了！生活就是要多一點這種閃閃發光的瞬間。這件喜事讓你想到了誰，或者想怎麼犒賞自己呢？快跟我多分享一些細節，讓我也沾沾你的喜氣！",
+                        "好讚的氛圍！聽著你的文字都能感受到那股雀躍。請把這份快樂在心裡好好存檔，它會成為你往後遇到困難時，最溫柔的禦寒外套喔！"
+                    ];
+                    aiReply = getRandom(replies);
+                } else if (userText.includes('迷茫') || userText.includes('未來') || userText.includes('不知道') || userText.includes('選擇')) {
+                    const replies = [
+                        "對未來的未知感到迷茫，其實是因為你很想認真地過好它。站在十字路口確實會不安，但沒關係，起步慢一點也無妨，你覺得目前最讓你猶豫不決的是什麼呢？",
+                        "不知道方向的時候，不如就先停下來看風景吧。不需要立刻做完美的決定。你想嘗試哪一種可能？就算選錯了也是一種體驗，別怕，我會陪著你摸索。",
+                        "迷茫是很正常的生命陣痛期。這代表你正在探索更適合自己的地方。放鬆點，我們把大問題切成今天要做的小事，比如等下一杯好喝的飲料，你覺得呢？"
+                    ];
+                    aiReply = getRandom(replies);
+                } else {
+                    if (chatStep === 0) {
+                        const replies = [
+                            "謝謝你跟我分享這些日常。聽你描述著生活的點滴，讓我覺得能陪伴在你身邊是一件很溫暖的事。聽起來這對你來說有些特別的感觸對嗎？",
+                            "日常的瑣碎裡，其實藏著最真實的心情呢。聽完你說的，我很好奇當時你心裡第一個浮現的想法是什麼？能再多告訴我一點點嗎？"
+                        ];
+                        aiReply = getRandom(replies);
+                        chatStep++;
+                    } else if (chatStep === 1) {
+                        const replies = [
+                            "原來是這樣呀...我正在很認真地聽喔。這段經歷對你來說一定有著不容易或很有意義的部分吧。不著急，慢慢來，後來還有發生什麼其他的小插曲嗎？",
+                            "我能理解這種微妙的感覺。有時候事情發生得就是這麼突然，但也許這就是生活的一種節奏。你接下來打算怎麼面對這件事呢？"
+                        ];
+                        aiReply = getRandom(replies);
+                        chatStep++;
+                    } else {
+                        const replies = [
+                            "不論日子是平淡還是充滿波折，能像這樣陪著你整理每一份心情，我覺得非常珍貴。你現在感覺心情有稍微舒緩一些嗎？隨時想說，我都隨時在。",
+                            "記錄下來的這一刻，它就變成你生命歷史的一頁了。今天就給自己打個及格以上的分數吧！好好休息，期待你明天帶給我的新故事。"
+                        ];
+                        aiReply = getRandom(replies);
+                        chatStep = 0;
+                    }
+                }
+
+                chatBox.innerHTML += `
+                    <div class="flex items-start gap-3">
+                        <div class="w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600 shrink-0"><i data-lucide="sparkles" class="w-4 h-4"></i></div>
+                        <div class="bg-white p-3 rounded-2xl rounded-tl-none shadow-sm border border-emerald-50 text-gray-700 max-w-[85%] text-sm leading-relaxed">${aiReply}</div>
+                    </div>
+                `;
+                lucide.createIcons();
+                container.scrollTop = container.scrollHeight;
+            }, 850);
+        }
+
+        function playGacha() {
+            const box = document.getElementById('gacha-machine-box');
+            box.classList.add('gacha-active');
+            setTimeout(() => {
+                box.classList.remove('gacha-active');
+                const resultModal = document.getElementById('gacha-result');
+                const replyBox = document.getElementById('gacha-reply-box');
+                
+                let text = "";
+                let time = "";
+                let color = "";
+                let aiReply = "";
+                const getRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+                if (diaries.length === 0) {
+                    time = "溫柔提示";
+                    text = "你還沒有在微日寫下過回憶耶。今天的天氣如何？或者現在的心情怎麼樣？去「記錄日常」跟我說第一句話吧，我很期待能幫你把記憶折疊收藏喔。";
+                    color = '#e2e8f0';
+                    document.getElementById('gacha-title-label').style.display = 'none';
+                    replyBox.style.display = 'none';
+                } else {
+                    document.getElementById('gacha-title-label').style.display = 'block';
+                    replyBox.style.display = 'block'; 
+
+                    const d = diaries[Math.floor(Math.random() * diaries.length)];
+                    time = `重溫你在 ${d.time} 的記憶`;
+                    text = `「${d.text}」`;
+                    color = d.color;
+
+                    if (d.text.includes('吵架') || d.text.includes('生氣') || d.text.includes('討厭')) {
+                        const replies = [
+                            "看見這段回憶，當時的心痛與拉扯彷彿還在。時間過去了，現在你的傷口好一點了嗎？希望那些憤怒已經隨著日子慢慢蒸發，留給自己更多的溫柔。",
+                            "那是個充滿火藥味的日子呢。當時的你一定覺得世界對你很不公平吧？如今回過頭看，有沒有慶幸自己當時沒有因為一時衝動而做出後悔的事？你做得很好喔。",
+                            "抽出這顆憤怒的膠囊，是不是驚訝當時自己有這麼大的情緒波動？沒關係，這證明你曾認真愛過、在乎過。把不快留在過去，今天依舊要開心地過。"
+                        ];
+                        aiReply = getRandom(replies);
+                    } else if (d.text.includes('累') || d.text.includes('難過') || d.text.includes('壓力') || d.text.includes('哭')) {
+                        const replies = [
+                            "看著當時陷入低潮的你，真的好想摸摸你的頭。現在重新回頭看，有沒有覺得自己其實比想像中還要勇敢、還要堅強呢？你真的成功撐過來了，謝謝你的不放棄。",
+                            "這是一段帶著淚水鹹味的回憶。當時的無助與沉重，如今都化為了你靈魂的養分。現在過得稍微輕鬆一點了嗎？記得，若又累了，隨時可以回來找我卸下心防。",
+                            "當時的你真的承載了太多不屬於你這個年紀或肩膀該扛的重量。時光流轉，現在看著文字的你，有沒有想對當時那個縮在角落哭泣的自己說一聲：『沒事了，你做得很棒』？"
+                        ];
+                        aiReply = getRandom(replies);
+                    } else if (d.text.includes('開心') || d.text.includes('高興') || d.text.includes('棒') || d.text.includes('順利')) {
+                        const replies = [
+                            "再次抽到這篇開心的記憶，嘴角是不是又忍不住上揚了呢？要把這種幸福的能量好好儲存起來，用來治癒未來每一個疲憊或無力的時刻喔！",
+                            "哇，亮晶晶的碎片被撈出來了！快樂是會反芻的，重新閱讀當時的文字，是不是又被那時的朝氣蓬勃給感染了？希望今天的你也能延續那天的幸運！",
+                            "這是你生命中精彩的吉光片羽呢。不管日子怎麼變，當時的那份純粹與雀躍是不會過期的。好高興我有幫你好好把它存下來，隨時為你提供溫暖。"
+                        ];
+                        aiReply = getRandom(replies);
+                    } else {
+                        const replies = [
+                            "時間過得好快，當時隨手寫下的平淡日常，現在都變成獨一無二的時光膠囊了。看著過去的自己，你有目標想對當時的你說些什麼嗎？",
+                            "生活就是由無數個這種看似平凡卻又不可複製的片段組成的。當時的你在想些什麼呢？是不是也和現在一樣，正期待著未來的某些事情發生呢？",
+                            "驀然回首，原來那天發生了這樣的小事呀。記憶有時會模糊，但微日幫你把這顆微小的日常沙礫凝結成了珍珠。願你能在這些細碎的回憶中找到平靜。"
+                        ];
+                        aiReply = getRandom(replies);
+                    }
+                }
+
+                document.getElementById('gacha-time').innerText = time;
+                document.getElementById('gacha-text').innerText = text;
+                document.getElementById('gacha-ai-reply').innerText = aiReply;
+                document.getElementById('capsule-color').style.backgroundColor = color;
+                
+                resultModal.classList.remove('hidden');
+            }, 1300);
+        }
+
+        function closeGacha() { document.getElementById('gacha-result').classList.add('hidden'); }
+
+        // ================= 情緒足跡地圖 =================
+        let map = L.map('map', { zoomControl: false }).setView([24.179, 120.601], 16); 
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+        map.on('zoomend', function() {
+            const currentZoom = map.getZoom();
+            const mapPane = document.querySelector('.leaflet-marker-pane');
+            if (mapPane) {
+                if (currentZoom >= 17) {
+                    mapPane.classList.add('show-labels');
+                } else {
+                    mapPane.classList.remove('show-labels');
+                }
+            }
+        });
+
+        map.on('click', e => {
+            selectedLatLng = e.latlng;
+            if (tempMarker) map.removeLayer(tempMarker);
+            tempMarker = L.marker(selectedLatLng).addTo(map).bindPopup("<div class='text-xs'>選定此點！請在下方鍵入心情。</div>").openPopup();
+        });
+
+        function addFootprintAtSelected() {
+            if (!selectedLatLng) selectedLatLng = map.getCenter();
+            const contentText = document.getElementById('emotion-tag').value || "留下了心情足跡";
+            
+            const icon = L.divIcon({
+                className: 'custom-icon',
+                html: `
+                    <div class="relative flex items-center justify-center w-8 h-8">
+                        <div class="emotion-glow" style="width: 32px; height: 32px; background-color: ${selectedColor}; box-shadow: 0 0 25px 12px ${selectedColor}; border: 2px solid rgba(255,255,255,0.4);"></div>
+                        <div class="map-footprint-label">${contentText}</div>
+                    </div>
+                `,
+                iconSize: [32, 32], iconAnchor: [16, 16]
+            });
+
+            L.marker(selectedLatLng, { icon }).addTo(map).bindPopup(`<div class="text-sm font-medium">${contentText}</div>`);
+            
+            if (tempMarker) map.removeLayer(tempMarker);
+            document.getElementById('emotion-tag').value = '';
+            selectedLatLng = null;
+
+            if (map.getZoom() < 17) {
+                map.setView(map.getCenter(), 17);
+            }
+        }
+
+        function toggleSharedFootprints(checkbox) {
+            if (checkbox.checked) {
+                const mocks = [
+                    { lat: 24.1791, lng: 120.6012, text: "匿名：在路思義教堂前吹風發呆...", color: "#9CA9BB" },
+                    { lat: 24.1812, lng: 120.6025, text: "匿名：文理大道綠蔭太療癒了~", color: "#A3B899" },
+                    { lat: 24.1775, lng: 120.5998, text: "匿名：微積分被當了，坐在階梯上哭出聲..", color: "#C9A7A7" },
+                    { lat: 24.1802, lng: 120.5985, text: "匿名：在牧場喝到冰牛奶，瞬間復活！", color: "#E5C1A7" },
+                    { lat: 24.1762, lng: 120.6031, text: "匿名：畢業前最後一次校園散步，滿滿的不捨", color: "#7FA499" },
+                    { lat: 24.1825, lng: 120.6001, text: "匿名：社團成發順利落幕！大家太棒了！", color: "#F0C265" },
+                    { lat: 24.1788, lng: 120.6045, text: "匿名：圖書館地下室冷氣好冷，但書很好看", color: "#B3A2C7" }
+                ];
+                mocks.forEach(m => {
+                    const icon = L.divIcon({
+                        className: 'mock-icon',
+                        html: `
+                            <div class="relative flex items-center justify-center w-7 h-7">
+                                <div class="emotion-glow" style="width: 28px; height: 28px; background-color: ${m.color}; box-shadow: 0 0 20px 10px ${m.color};"></div>
+                                <div class="map-footprint-label">${m.text}</div>
+                            </div>
+                        `,
+                        iconSize: [28, 28], iconAnchor: [14, 14]
+                    });
+                    sharedMarkersGroup.addLayer(L.marker([m.lat, m.lng], { icon }).bindPopup(`<div class="text-xs font-medium text-emerald-800">${m.text}</div>`));
+                });
+                map.addLayer(sharedMarkersGroup);
+            } else {
+                sharedMarkersGroup.clearLayers();
+            }
+        }
+    </script>
+</body>
+</html>
